@@ -35,6 +35,15 @@ provider_service_line ENUM('Emergency', 'Trauma', 'Ortho', 'Neuro', 'Internal Me
 
 DESC providers;
  
+ /* The ED is the starting point for patients. Each patient must be assigned an provider from the Emergency service line. 
+		Patients can then be discharged directly from the ED or be admitted to the hospital.
+
+Abbreviations/definitions: 
+	Chief complaint: mrn = Medical Record Number. Patient's complaint/reason for being seen; OR = Operating Room; Cathlab = Cardiac Catheterization Lab;
+	ICU = Intensive Care Unit; Floor = non-critical patient admit; Telemetry = Admission to floor capable of cardiac monitoring; 
+    DC = Discharged directly from ED
+*/	
+ 
 CREATE TABLE emergency_dept(
   encounter_id INT UNSIGNED UNIQUE PRIMARY KEY,
   mrn INT UNSIGNED NOT NULL, -- Unique number assigned to each patient. However, each patient may be seen in the ED more than once, so this was not used as the primary key
@@ -42,7 +51,9 @@ CREATE TABLE emergency_dept(
   pt_lname VARCHAR(25) NOT NULL, -- Patient last name 
   gender VARCHAR(1), -- allowing nulls and blanks for query examples later. 
   age INT UNSIGNED, -- allowing nulls to provide opportunies to query to null values later.
-  chief_complaint VARCHAR(25) NOT NULL, -- Patient's complaint/reason for being seen.
+  chief_complaint VARCHAR(25) NOT NULL,
+  race ENUM('Black', 'White', 'Hispanic', 'Other'), 
+  ed_disposition ENUM('OR','Cathlab', 'ICU', 'Floor', 'Telemetry', 'DC'),
   datetime_arrival DATETIME NOT NULL,
   provider_empID VARCHAR(6) NOT NULL,
 CONSTRAINT ed_provider_empID_fk FOREIGN KEY (provider_empID)
@@ -50,7 +61,7 @@ REFERENCES providers (provider_empID)
   )
   ;
 
-  DESC emergency_dept;
+DESC emergency_dept;
   
   -- Creating table to record vital signs. 
   -- 	Each patient can have numerous vital signs assessed throughout their hospital stay. 
@@ -95,84 +106,74 @@ REFERENCES emergency_dept (encounter_id)
 
 DESC procedures;
 
- 
-
+/*
+Not all patients will be admitted; some will either be discharged from the ED as the did not require admission, or pehaps
+	they died as a result of a medical emergency.
+    
+Definitions: 
+ Floor = Non-critical patient. Rountin hospital admission.
+ ICU = Critically ill/injured patient. 
+ Telemetry = Admissions that require cardiac monitoring. 
+*/
 CREATE TABLE hospital_admission(
 admission_id INT UNSIGNED UNIQUE  PRIMARY KEY,
-floor_name ENUM ('Floor', 'ICU', 'Telemetry', 'Med-Surg', 'ED') NOT NULL DEFAULT 'ED', -- Default ED as patient not admitted will only be seen in the ED. 
+floor_name ENUM ('Floor', 'ICU', 'Telemetry'), 
 datetime_admission DATETIME NOT NULL,
-admission_diagnosis VARCHAR(25),
-admitting_provider_id INT UNSIGNED UNIQUE,
-CONSTRAINT admission_provider FOREIGN KEY (admitting_provider_id)
-REFERENCES admitting_provider (admitting_provider_id)
+admission_diagnosis VARCHAR(25), -- going to allow nulls and blanks for purposes of query examples later
+encounter_id INT UNSIGNED UNIQUE NOT NULL,
+provider_empID VARCHAR(6) UNIQUE NOT NULL,
+CONSTRAINT admitting_provider_fk FOREIGN KEY (provider_empID)
+REFERENCES providers (provider_empID),
+CONSTRAINT admitted_pt_fk FOREIGN KEY (encounter_id)
+REFERENCES emergency_dept (encounter_id)
 )
-DEFAULT CHARACTER SET = utf8mb4
-COLLATE = utf8mb4_unicode_ci;
 ;
 
 DESC hospital_admission; 
 
-INSERT INTO hospital_admission (admission_id, floor_name, datetime_admission, admission_diagnosis, admitting_provider_id)
-	VALUES (null, "Telemetry", "2023-01-01 05:00", " ", 1);
-
-SELECT * FROM hospital_admission;
-
-/* Creating table for hospital discharge information.
+/* Creating table for hospital discharge information. Each patient needs to have a discharging provider.
 	Patients can be discharged directly from the ED or whatever floor they go to.
 		Home = Routine discharge
         Death = Patient died
 		LTAC = Long Term Care Facility
         SNF = Skilled Nursing Facility
-        Transfer = Transfered to outside hospital 
-        AMA = Against Medical Advice
     */ 
-
-DROP TABLE IF EXISTS hospital_discharge;
 
 CREATE TABLE hospital_discharge(
 discharge_id INT UNSIGNED UNIQUE PRIMARY KEY,
-dc_location ENUM ('Home', 'Death', 'LTAC', 'SNF', 'Transfer', 'AMA'), -- will allow nulls to demonstrate code to select nulls and blanks.
-datetime_dc DATETIME, 
-patient_id INT UNSIGNED UNIQUE,
-admitting_provider_id INT UNSIGNED UNIQUE, 
-CONSTRAINT discharging_provider_fk FOREIGN KEY (admitting_provider_id)
-REFERENCES admitting_provider (admitting_provider_id),
-CONSTRAINT patient_discharge_fk FOREIGN KEY (patient_id)
-REFERENCES emergency_dept (patient_id)
+dc_location ENUM ('Home', 'Death', 'LTAC', 'SNF'),
+datetime_dc DATETIME NOT NULL, 
+encounter_id INT UNSIGNED UNIQUE,
+provider_empID VARCHAR(6), 
+CONSTRAINT discharging_provider_fk FOREIGN KEY (provider_empID)
+REFERENCES providers (provider_empID),
+CONSTRAINT patient_discharge_fk FOREIGN KEY (encounter_id)
+REFERENCES emergency_dept (encounter_id)
 )
-DEFAULT CHARACTER SET = utf8mb4
-COLLATE = utf8mb4_unicode_ci
 ;
 
 DESC hospital_discharge;
 
-INSERT INTO hospital_discharge (discharge_id, dc_location, datetime_dc, patient_id, admitting_provider_id)
-	VALUES (null, 'Home', '2023-01-06', 1, 1);
 
-SELECT * FROM hospital_discharge;
-
--- Creating table for final dianoses. Patients have to be discharged from the hospital in order to have any final diagnoses.
+/* Creating table for final dianoses. Patients have to be discharged from the hospital in order to have any final diagnoses.
+Each diagnosis needs to be made by a provider, and each patient needs at least one diagnosis, but may have many.
+*/
 DROP TABLE IF EXISTS diagnosis;
 
 CREATE TABLE diagnosis(
 diagnosis_id INT UNSIGNED UNIQUE PRIMARY KEY,
 diagnosis_code VARCHAR(10) NOT NULL,
 diagnosis_name VARCHAR(25) NOT NULL,
-patient_id INT UNSIGNED NOT NULL,
+encounter_id INT UNSIGNED NOT NULL,
 discharge_id INT UNSIGNED NOT NULL,
-CONSTRAINT patient_diagnosis_fk FOREIGN KEY (patient_id)
-REFERENCES emergency_dept (patient_id),
+provider_empID VARCHAR(6),
+CONSTRAINT patient_diagnosis_fk FOREIGN KEY (encounter_id)
+REFERENCES emergency_dept (encounter_id),
+CONSTRAINT diagnosis_provider_fk FOREIGN KEY (provider_empID)
+REFERENCES providers (provider_empID),
 CONSTRAINT discharge_diagnosis_fk FOREIGN KEY (discharge_id)
 REFERENCES hospital_discharge (discharge_id)
 )
-DEFAULT CHARACTER SET = utf8mb4
-COLLATE = utf8mb4_unicode_ci
 ;
 
 DESC diagnosis;
-
-
-INSERT INTO diagnosis (diagnosis_id, diagnosis_code, diagnosis_name, patient_id, discharge_id)
-	VALUES(null, 'ANG', 'Angina', 1, 1);
-
-SELECT * FROM diagnosis;
